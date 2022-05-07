@@ -1,5 +1,7 @@
 *test/
 *data/
 *models/
-*.ipynb
 data/.ts*
+__MACOSX
+UCI HAR Dataset.zip
+UCI HAR Dataset

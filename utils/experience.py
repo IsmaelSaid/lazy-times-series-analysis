@@ -22,6 +22,7 @@ from utils.ts_tools import transform_data
 from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import SelectFdr
 from sklearn.decomposition import PCA
+from tsfel import * 
 
 
 
@@ -38,23 +39,34 @@ params_rs_default = {
 
 
 class Experience():
-    # def randomized_search_default_distribution():
-        # return params_rs_default
 
     def __init__(self,regresseurs,dossier_sortie,x,y,nom_probleme):
+
+        '''
+        --------------------------------------------------------------------
+        Configuration
+        '''
         self.config_general = {
             'normalisation' : False,
             'train_size' : 0.7,
             'cv':10,
-            'scorer':'rmse',
-            'optimisation':GridSearchCV
+            'scorer':'neg_root_mean_squared_error',
+            'optimisation':GridSearchCV,
+            'extraction_features':True,
+            'librairie_extraction_features':'tsfresh'
 
         }
+
         
         self.config_tsfresh = {
-            'features_extraction' : False,
             'choix_features':EfficientFCParameters()
         }
+
+        self.config_tsfel = {
+            'choix_features':tsfel.get_features_by_domain()
+        }
+
+
 
         self.params_rs_default = {
             'linear_regression':{
@@ -85,6 +97,9 @@ class Experience():
                 }
         }
 
+        '''
+        -----------------------------------------------------------------------------------
+        '''
         
 
         self.nom_probleme = nom_probleme
@@ -102,6 +117,9 @@ class Experience():
     '''
 
         # ------------------------------------------------------Configuration experience  -------------------------------------------------------------
+    def changer_librairie_extraction(self, nom_librairie):
+        self.config_general['librairie_extraction_features'] = nom_librairie
+
     def changer_config_general(self,nouvelle_config):
         self.config_general = nouvelle_config
 
@@ -129,7 +147,8 @@ class Experience():
             self.og_x,
             self.og_y,
             normalise = self.config_general['normalisation'],
-            features_extraction = self.config_tsfresh['features_extraction']
+            features_extraction = self.config_general['extraction_features'],
+            librairie=self.config_general['librairie_extraction_features']
             )
 
         # return (self._X,self._Y)
@@ -157,7 +176,7 @@ class Experience():
             }
         return resultat
 
-    def comparer_modele(self,cv = 5,metrique = 'neg_mean_squared_error' ,sauvegarder_plotbox = False):
+    def comparer_modele(self,cv = 5,sauvegarder_plotbox = False):
         '''
         TODO sauvegarde boxplot 
         '''
@@ -166,7 +185,7 @@ class Experience():
             print(clee)
             reg = val 
             regreseur = reg.model
-            resultat[clee] = cross_val_score(regreseur,self._X,self._Y,cv=cv,scoring = metrique )
+            resultat[clee] = cross_val_score(regreseur,self._X,self._Y,cv=cv,scoring = self.config_general['scorer'] )
         if(sauvegarder_plotbox == True):
             # Sauvegarder plot quelquepart 
             pass 
@@ -189,7 +208,7 @@ class Experience():
                     param_distributions = self.params_rs_default[clee],
                     cv = cv,
                     n_iter = niter,
-                    scoring = make_scorer(mean_absolute_percentage_error,greater_is_better=False)
+                    scoring = self.config_general['scorer']
                     )
                 rand_search.fit(self._X,self._Y)
                 self.dico_regresseurs[clee].model = rand_search.best_estimator_
@@ -206,7 +225,7 @@ class Experience():
                     estimator = regresseur.model,
                     param_grid = self.params_rs_default[clee],
                     cv = cv,
-                    scoring = make_scorer(mean_absolute_percentage_error,greater_is_better=False)
+                    scoring = self.config_general['scorer']
                     )
                 grid_search.fit(self._X,self._Y)
                 self.dico_regresseurs[clee].model = grid_search.best_estimator_
@@ -304,9 +323,10 @@ class Experience():
 
         # ------------------------------------------------------Transformation des données  -------------------------------------------------------------
         
+    # TODO Il faudrait que les formatter puissent travailler sur des données déjà process 
+    
     def tsfresh_format(self,X,Y,normalise = None,verbose = True):
-        #Transformation vers numpy array
-        # x = process_data(X,min_len = min_len(X),normalise = normalise)
+        print('TSFRESH format')
         x = process_data(X,min_len(X),normalise)
         X_df = pd.DataFrame(x.reshape(x.shape[0]*x.shape[1],x.shape[2]))
         records_length = x.shape[1]
@@ -328,20 +348,56 @@ class Experience():
             column_id="id",
             column_sort="time",
             default_fc_parameters = self.config_tsfresh['choix_features'])
-        return (ex,Y_tsf)
+        return (ex,Y)
+
+
+    def tsfel_format(self,X,Y,normalise = None, verbose = True):
+        '''
+        TODO 
+        '''
+
+        print('TSFEL format')
+        x = process_data(X,min_len(X),normalise)
+        X_df = pd.DataFrame(x.reshape(x.shape[0]*x.shape[1],x.shape[2]))
+        taille_serie_temporelle = x.shape[1]
+        nombre_serie_temporelle = x.shape[0]
+        print("taille series temporelles = {}".format(taille_serie_temporelle))
+        print("id différent  = {}".format(nombre_serie_temporelle))
+
+        cfg_file = self.config_tsfel['choix_features']
+        result = tsfel.time_series_features_extractor(cfg_file,X_df,fs=None,window_size = taille_serie_temporelle) 
+        return (result,Y)
+
         
+       
+
+
+
+
+
+
+
+       
+
+
 
 
         
 
+
         
-    def transform_data(self,X,Y,normalise = None, features_extraction = None):
+
+        
+    def transform_data(self,X,Y,librairie,normalise = None, features_extraction = None):
         # print("Transformation des données")
         # print("Normalisation :{}".format(normalise))
         
+
         if(features_extraction == True):
-            x,y = self.tsfresh_format(X,Y,normalise = normalise)
-            return x,Y
+            if(librairie == 'tsfresh'):
+                return self.tsfresh_format(X,Y,normalise = normalise)
+            elif(librairie == 'tsfel'):
+                return self.tsfel_format(X,Y,normalise = normalise)
         else:
     #         Vérifier les dimensions
             x = process_data(X,min_len(X),normalise = normalise)
