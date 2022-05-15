@@ -111,7 +111,7 @@ class Experience():
             },
             'xgboost': {
                 "reg__eta":[0.1,0.05,0.01],
-                "reg__gamma":[0.1],
+                "reg__gamma":[0.1,0.2,0.3,0.4,0.5],
                 "reg__max_depth":[5,10,15,20],
                 "reg__subsample":[i for i in np.arange(0.25,0.5,0.1)],
                 "reg__colsample_bytree":[i for i in np.arange(0.2,0.9,0.1)],
@@ -128,9 +128,7 @@ class Experience():
                 "reg__epsilon": [i for i in np.arange(0.5,1,0.1)]
             }
         }
-        '''
-        TODO: maj hp
-        '''
+      
 
         # Visualisation
         sns.set(rc={'figure.figsize': (15, 8)})
@@ -143,10 +141,10 @@ class Experience():
         self.Regresseurs = regresseurs
         self.dossier_sortie = dossier_sortie
         self.dossier_donees = dossier_donnees
-        self.og_x = None
-        self.og_y = None
-        self._X = None
-        self._Y = None
+        self.original_x = None
+        self.original_y = None
+        self.X = None
+        self.Y = None
 
     '''
     TODO Ajouter a la classe des configurations préfaites 
@@ -178,36 +176,19 @@ class Experience():
             self.dico_regresseurs[nom_reg] = create_regressor(nom_reg, sortie)
 
     def transformation(self):
-        self._X, self._Y = self.transform_data(
-            self.og_x,
-            self.og_y,
+        self.X, self.Y = self.transform_data(
+            self.original_x,
+            self.original_y,
             normalise=self.config_general['normalisation'],
             features_extraction=self.config_general['extraction_features'],
             librairie=self.config_general['librairie_extraction_features']
         )
 
-        # return (self._X,self._Y)
+        # return (self.X,self.Y)
 
         # ------------------------------------------------------Comparaison modèles  -------------------------------------------------------------
 
-    def experience_train_test(self, test_size=0.3):
-        '''
-        TODO sauvegarde dataframe 
-        '''
-        resultat = {}
-        x_train, x_test, y_train, y_test = train_test_split(
-            self._X, self._Y, test_size=test_size, shuffle=False)
-        for clee, val in self.dico_regresseurs.items():
-            print("--------- Algorithme : {} ---------".format(clee))
-            regresseur = val
-            regresseur.fit(x_train, y_train)
-            y_pred = regresseur.predict(x_test)
-            resultat[clee] = {
-                'RMSE': math.sqrt(mean_squared_error(y_test, y_pred)),
-                'MAPE': mean_absolute_error(y_test, y_pred),
-                'MAE':  mean_absolute_percentage_error(y_test, y_pred)
-            }
-        return resultat
+  
 
     def experience_train_test(self, nom_regresseur):
         '''
@@ -215,7 +196,7 @@ class Experience():
         '''
         resultat = {}
         x_train, x_test, y_train, y_test = train_test_split(
-            self._X, self._Y, test_size=self.config_general['train_size'], shuffle=False)
+            self.X, self.Y, test_size=self.config_general['train_size'], shuffle=False)
 
         regresseur = self.dico_regresseurs[nom_regresseur].model
         start_time = time.perf_counter()
@@ -238,8 +219,7 @@ class Experience():
             reg = val
             regreseur = reg.model
             resultat[clee] = cross_val_score(
-                # regreseur, self._X, self._Y, cv=self.config_general['cv'], scoring=self.config_general['scorer'])
-                regreseur, self._X, self._Y, cv=10, scoring=self.config_general['scorer'])
+                regreseur, self.X, self.Y, cv=10, scoring=self.config_general['scorer'])
             score[clee] = np.mean(resultat[clee])
             print("[{}] {}  : {:.3f}".format(clee,self.config_general['scorer'],score[clee] * -1))
 
@@ -271,8 +251,6 @@ class Experience():
             nom_fichier = self.nom_probleme+'-'+self.config_general['librairie_extraction_features']+"{}-{}-{}-{}.png".format(time.strftime("%Y"),time.strftime("%B"),time.strftime("%d"),time.strftime("%S"))
             plt.savefig(self.dossier_sortie+'/'+nom_fichier)
 
-            # Sauvegarder plot quelquepart
-            pass
         return self.dico_regresseurs
 
         # ------------------------------------------------------ Optimisation hyperparamètres -------------------------------------------------------------
@@ -293,7 +271,7 @@ class Experience():
                     n_iter=self.config_general['n_iter'],
                     scoring=self.config_general['scorer']
                 )
-                rand_search.fit(self._X, self._Y)
+                rand_search.fit(self.X, self.Y)
                 self.dico_regresseurs[clee].model = rand_search.best_estimator_
                 resultat[clee] = {
                     'meilleur': rand_search.best_estimator_
@@ -308,7 +286,7 @@ class Experience():
                     cv=self.config_general["cv"],
                     scoring=self.config_general['scorer']
                 )
-                grid_search.fit(self._X, self._Y)
+                grid_search.fit(self.X, self.Y)
                 self.dico_regresseurs[clee].model = grid_search.best_estimator_
                 resultat[clee] = {
                     'meilleur': grid_search.best_estimator_
@@ -325,7 +303,7 @@ class Experience():
         TODO: Description
         '''
         fs = SelectKBest(score_func=f_regression, k='all')
-        fs.fit(self._X, self._Y)
+        fs.fit(self.X, self.Y)
         result = pd.DataFrame({
             'nom_features': [nom_feature for nom_feature in fs.feature_names_in_],
             'fscore': [fscore for fscore in fs.scores_]})
@@ -337,7 +315,7 @@ class Experience():
         TODO: Description
         '''
         fs = SelectKBest(score_func=mutual_info_regression, k='all')
-        fs.fit(self._X, self._Y)
+        fs.fit(self.X, self.Y)
         result = pd.DataFrame({
             'nom_features': [nom_feature for nom_feature in fs.feature_names_in_],
             'fscore': [fscore for fscore in fs.scores_]})
@@ -350,7 +328,7 @@ class Experience():
         resultat = dict()
         tmp = self.dico_regresseurs.copy()
         if(self.config_general['select_k_best'] == True):
-            num_features = [i for i in range(2, self._X.columns.size)]
+            num_features = [i for i in range(2, self.X.columns.size)]
             grid = dict()
             grid['sel__k'] = num_features
             grid['sel__score_func'] = [f_regression,mutual_info_regression]
@@ -365,7 +343,7 @@ class Experience():
                                             cv=self.config_general['cv'],
                                             n_iter=self.config_general['n_iter'])
 
-                search.fit(self._X, self._Y)
+                search.fit(self.X, self.Y)
                 nouveau_regresseur = create_regressor(clee, self.dossier_sortie)
                 nouveau_regresseur.model = search.best_estimator_
                 
@@ -389,7 +367,7 @@ class Experience():
                                             cv=self.config_general['cv'],
                                             n_iter=self.config_general['n_iter'])
 
-                search.fit(self._X, self._Y)
+                search.fit(self.X, self.Y)
                 nouveau_regresseur = create_regressor(
                     clee, self.dossier_sortie)
                 nouveau_regresseur.model = search.best_estimator_
@@ -430,7 +408,7 @@ class Experience():
         Y_tsf["target"] = Y
         
         ex = extract_relevant_features(
-            X_with_id, self.og_y,
+            X_with_id,self.original_y,
             column_id="id",
             default_fc_parameters=self.config_tsfresh['choix_features'])
         return (ex,Y)
@@ -471,8 +449,8 @@ class Experience():
         X_train, y_train = load_from_tsfile_to_dataframe(train_file)
         X_test, y_test = load_from_tsfile_to_dataframe(test_file)
 
-        self.og_x = pd.concat([X_train, X_test], axis=0)
-        self.og_y = pd.concat([pd.Series(y_train), pd.Series(y_test)], axis=0)
+        self.original_x = pd.concat([X_train, X_test], axis=0)
+        self.original_y = pd.concat([pd.Series(y_train), pd.Series(y_test)], axis=0)
         
         self.transformation()
 
@@ -483,20 +461,18 @@ class Experience():
         # debug
         self.init_regresseurs()
         self.load()
-        print(len(self._X))
+        print(len(self.X))
         print(self.config_general)
         
         # script
 
-        print("TSFRESH")
         self.optimisation_hpo()
         self.optimisation_nombre_feature()
         self.comparer_modele()
         
-        print("TSFEL")
         self.changer_librairie_extraction('tsfel')
         self.transformation()
-        print(self._X.shape)
+        print(self.X.shape)
         self.init_regresseurs()
         self.optimisation_hpo()
         self.optimisation_nombre_feature()
