@@ -5,3 +5,10 @@ data/.ts*
 __MACOSX
 UCI HAR Dataset.zip
 UCI HAR Dataset
+utils/__pycache__/ts_tools.cpython-310.pyc
+utils/__pycache__/tools.cpython-310.pyc
+utils/__pycache__/regressor.cpython-310.pyc
+utils/__pycache__/regressor_tools.cpython-310.pyc
+utils/__pycache__/experience.cpython-310.pyc
+utils/__pycache__/data_processor.cpython-310.pyc
+utils/__pycache__/data_loader.cpython-310.pyc
