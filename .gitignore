@@ -1,6 +1,7 @@
 *test/
 *data/
 *models/
+output/
 data/.ts*
 __MACOSX
 UCI HAR Dataset.zip

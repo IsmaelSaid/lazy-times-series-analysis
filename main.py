@@ -19,20 +19,19 @@ TODO: possibilité d'écrire l'extraction de features dans un fichier
 TODO: possibilité de choisir la taille de train size 
 TODO: Possibilité d'écrire les predictions dans un fichier
 TODO: Pour chaque regresseur utilisé écrire les paramètre trouvé lors de HPO dans un fichier  
-
 TODO: Quelques visualisations
 '''
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", "--problem", required=False,
-                    nargs="+", default=["Sample"])
+                    nargs="+", default=["BeijingPM10Quality"])
 parser.add_argument("-c", "--regressors", required=False,
-                    nargs="+", default=["random_forest"])
+                    nargs="+", default=["xgboost","random_forest","SVR","linear_regression"])
 parser.add_argument("-o", "--output", required=False, default="output/")
 parser.add_argument("-fx", "--features_extraction",
                     required=False, default=None)
-parser.add_argument("-n", "--normalise", required=False, default=None)
-parser.add_argument("-cv", "--cross_validation", required=False, default=5)
+parser.add_argument("-n", "--normalise", required=False, default="minmax")
+parser.add_argument("-cv", "--cross_validation", required=False, default=3)
 parser.add_argument("-ni", "--n_iteration", required=False, default=5)
 parser.add_argument("-lib", "--librairie", required=False, default='tsfresh')
 arguments = parser.parse_args()
@@ -47,7 +46,6 @@ output_dir = arguments.output
 cv =  int(arguments.cross_validation)
 ni = int(arguments.n_iteration)
 lib = arguments.librairie
-warnings.filterwarnings("ignore")
 
 if __name__ == '__main__':
 
@@ -61,11 +59,12 @@ if __name__ == '__main__':
             'scorer': 'neg_root_mean_squared_error',
             'optimisation': 'randomized_search',
             'extraction_features': True,
-            'librairie_extraction_features': lib,
+            'librairie_extraction_features': 'tsfel',
             'n_iter':ni,
             'sauvegarder_boxplot': True,
             'sequential_forward_search': False,
             'select_k_best': True
 
         })
-        exp.run()
+        exp.low_cost_analysis()
+        

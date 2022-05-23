@@ -15,13 +15,14 @@ from sklearn.model_selection import (GridSearchCV, RandomizedSearchCV,
 from tqdm import tqdm
 from tsfresh import extract_relevant_features
 from tsfresh.feature_extraction import (EfficientFCParameters,
+                                        ComprehensiveFCParameters,
                                         MinimalFCParameters)
 from tsfresh.feature_selection.relevance import calculate_relevance_table
 from tsfresh.utilities.dataframe_functions import add_sub_time_series_index
 from utils.data_loader import load_from_tsfile_to_dataframe
 
 from utils.regressor import calculate_metrics, create_regressor
-from utils.regressor_tools import min_len, process_data
+from utils.regressor_tools import calculate_regression_metrics, min_len, process_data
 from utils.tools import create_directory
 from utils.ts_tools import transform_data
 from sklearn.pipeline import Pipeline
@@ -49,7 +50,7 @@ class Experience():
         Configuration
         '''
         self.config_general = {
-            'normalisation': True,
+            'normalisation': 'minmax',
             'train_size': 0.7,
             'cv': 5,
             'scorer': 'neg_root_mean_squared_error',
@@ -59,16 +60,17 @@ class Experience():
             'n_iter': 5,
             'sauvegarder_boxplot': True,
             'sequential_forward_search': False,
-            'select_k_best': True
+            'select_k_best': False
 
         }
 
         self.config_tsfresh = {
             'choix_features': EfficientFCParameters()
+            # 'choix_features': MinimalFCParameters()
         }
 
         self.config_tsfel = {
-            'choix_features': tsfel.get_features_by_domain('statistical')
+            'choix_features': tsfel.get_features_by_domain()
         }
 
         self.params_rs_default = {
@@ -92,9 +94,9 @@ class Experience():
                 },
             'SVR': {
                 "kernel": ["poly", "rbf"],
-                "gamma": ["scale","auto"],
+                "gamma": [0.001, 0.01, 0.1, 1],
                 "shrinking": [True],
-                "C": [1],
+                "C": [0.1, 1, 10, 100],
                 "epsilon": [1]
             }
         }
@@ -110,7 +112,8 @@ class Experience():
                 "reg__fit_intercept": [True, False]
             },
             'xgboost': {
-                "reg__eta":[0.1,0.05,0.01],
+                "reg__n_estimators": [100, 500, 1000],
+                "reg__learning_rate":[0.01,0.05,0.1],
                 "reg__gamma":[0.1,0.2,0.3,0.4,0.5],
                 "reg__max_depth":[5,10,15,20],
                 "reg__subsample":[i for i in np.arange(0.25,0.5,0.1)],
@@ -122,9 +125,9 @@ class Experience():
                 },
             'SVR': {
                 "reg__kernel": ["poly", "rbf"],
-                "reg__gamma": ["scale","auto"],
+                "reg__gamma": [0.001, 0.01, 0.1, 1],
                 "reg__shrinking": [True],
-                "reg__C": [i for i in np.arange(0.5,1,0.1)],
+                "reg__C":  [0.1, 1, 10, 100],
                 "reg__epsilon": [i for i in np.arange(0.5,1,0.1)]
             }
         }
@@ -194,7 +197,6 @@ class Experience():
         '''
         TODO sauvegarde dataframe 
         '''
-        resultat = {}
         x_train, x_test, y_train, y_test = train_test_split(
             self.X, self.Y, test_size=self.config_general['train_size'], shuffle=False)
 
@@ -202,7 +204,7 @@ class Experience():
         start_time = time.perf_counter()
         regresseur.fit(x_train, y_train)
         train_duration = time.perf_counter() - start_time
-        print('[{}] temps entraînement {:.3f}s'.format(nom_regresseur, train_duration))
+        print('[{}] temps entraînement {:.5f}s'.format(nom_regresseur, train_duration))
         y_pred = regresseur.predict(x_test)
         rmse = math.sqrt(mean_squared_error(y_test, y_pred))
 
@@ -219,9 +221,9 @@ class Experience():
             reg = val
             regreseur = reg.model
             resultat[clee] = cross_val_score(
-                regreseur, self.X, self.Y, cv=10, scoring=self.config_general['scorer'])
+                regreseur, self.X, self.Y, cv=2, scoring=self.config_general['scorer'])
             score[clee] = np.mean(resultat[clee])
-            print("[{}] {}  : {:.3f}".format(clee,self.config_general['scorer'],score[clee] * -1))
+            print("[{}] {}  : {:.5f}".format(clee,self.config_general['scorer'],score[clee] * -1))
 
         if(self.config_general['sauvegarder_boxplot'] == True):
             finale = []
@@ -237,7 +239,7 @@ class Experience():
             )
             for clee, val in self.dico_regresseurs.items():
                 moyenne =  np.mean(resultat[clee])
-                res = str("Modèle :{} \n moyenne rmse : {:.3f} ").format(
+                res = str("Modèle :{} \n moyenne rmse : {:.5f} ").format(
                     clee,
                    score[clee] * -1)
                 finale.append(res)
@@ -394,6 +396,8 @@ class Experience():
         x = process_data(X,min_len(X),normalise)
         X_df = pd.DataFrame(x.reshape(x.shape[0]*x.shape[1],x.shape[2]))
         records_length = x.shape[1]
+        taille_serie_temporelle = x.shape[1]
+        nombre_serie_temporelle = x.shape[0]
         
         # Transformation vers df 
         X_with_id = add_sub_time_series_index(X_df,records_length)
@@ -407,24 +411,29 @@ class Experience():
         Y_tsf["id"] = _Y
         Y_tsf["target"] = Y
         
+        start_time = time.perf_counter()
         ex = extract_relevant_features(
-            X_with_id,self.original_y,
+            X_with_id,Y,
             column_id="id",
             default_fc_parameters=self.config_tsfresh['choix_features'])
+        train_duration = time.perf_counter() - start_time
+        print("Taille series : {}, Nombre séries : {}, {} -> {} En {:.3f} s".format(taille_serie_temporelle,nombre_serie_temporelle,X.shape,ex.shape,train_duration))
         return (ex,Y)
 
     def tsfel_format(self, X, Y, normalise=None, verbose=True):
         '''
-        TODO 
+        TODO Description
         '''
-
         x = process_data(X, min_len(X), normalise)
         X_df = pd.DataFrame(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
         taille_serie_temporelle = x.shape[1]
         nombre_serie_temporelle = x.shape[0]
         cfg_file = self.config_tsfel['choix_features']
+        start_time = time.perf_counter()
         result = tsfel.time_series_features_extractor(
             cfg_file, X_df, fs=None, window_size=taille_serie_temporelle)
+        train_duration = time.perf_counter() - start_time
+        print("Taille series : {}, Nombre séries : {}, {} -> {} En {:.3f} s".format(taille_serie_temporelle,nombre_serie_temporelle,X.shape,result.shape,train_duration))
         return (result, Y)
 
     def transform_data(self, X, Y, librairie, normalise, features_extraction=None):
@@ -454,39 +463,47 @@ class Experience():
         
         self.transformation()
 
-        
-        
-    def run(self):
-        warnings.filterwarnings("ignore")
-        # debug
+        # ------------------------------------------------------Annalyse -------------------------------------------------------------
+    def low_cost_analysis(self):
         self.init_regresseurs()
+        # tsfel
+        
         self.load()
-        print(len(self.X))
-        print(self.config_general)
-        
-        # script
+        x_train, x_test, y_train , y_test = train_test_split(self.X,self.Y)
+        for clee,reg in self.dico_regresseurs.items():
+            start_time = time.perf_counter()
+            reg.model.fit(x_train,y_train)
+            train_duration = time.perf_counter() - start_time
+           
+            y_pred = reg.model.predict(x_test)
+            df_metrics = calculate_regression_metrics(y_test, y_pred)
+            print("[tsfel {}] rmse : {:.5f} mae : {:.5f} temps entrainement: {:.3f} s".format(clee,df_metrics.iloc[0]['rmse'],df_metrics.iloc[0]['mae'],train_duration))
+            
 
-        self.optimisation_hpo()
-        self.optimisation_nombre_feature()
-        self.comparer_modele()
-        
-        self.changer_librairie_extraction('tsfel')
+        # tsfresh
+        self.config_general['librairie_extraction_features'] = 'tsfresh'
         self.transformation()
-        print(self.X.shape)
-        self.init_regresseurs()
-        self.optimisation_hpo()
-        self.optimisation_nombre_feature()
-        self.comparer_modele()
+        x_train, x_test, y_train , y_test = train_test_split(self.X,self.Y)
+        for clee,reg in self.dico_regresseurs.items():
+            start_time = time.perf_counter()
+            reg.model.fit(x_train,y_train)
+            train_duration = time.perf_counter() - start_time
+            y_pred = reg.model.predict(x_test)
+            df_metrics = calculate_regression_metrics(y_test, y_pred)
+            print("[tsfresh {}] rmse : {:.5f} mae : {:.5f} temps entrainement: {:.3f} s ".format(clee,df_metrics.iloc[0]['rmse'],df_metrics.iloc[0]['mae'],train_duration))
         
-        print("Originaux")
+        # pas d'extraction
         self.config_general['extraction_features'] = False
         self.transformation()
-        self.init_regresseurs()
-        self.optimisation_hpo()
-        # self.optimisation_nombre_feature()
-        self.comparer_modele()
-    
-        
-  
-              
-             
+        x_train, x_test, y_train , y_test = train_test_split(self.X,self.Y)
+        for clee,reg in self.dico_regresseurs.items():
+            start_time = time.perf_counter()
+            reg.model.fit(x_train,y_train)
+            train_duration = time.perf_counter() - start_time
+            y_pred = reg.model.predict(x_test)
+            df_metrics = calculate_regression_metrics(y_test, y_pred)
+            print("[base {}] rmse : {:.5f} mae : {:.5f} temps entrainement: {:.3f} s ".format(clee,df_metrics.iloc[0]['rmse'],df_metrics.iloc[0]['mae'],train_duration))
+            
+
+
+            
