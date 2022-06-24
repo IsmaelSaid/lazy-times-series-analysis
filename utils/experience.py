@@ -1,45 +1,29 @@
 from calendar import c
 from datetime import datetime
 import math
-from statistics import linear_regression
 import numpy as np
 import pandas as pd
-from matplotlib.transforms import Bbox, Transform
 from scipy.stats import kendalltau
-from sklearn import feature_extraction
-from sklearn.metrics import (make_scorer, mean_absolute_error,
-                             mean_absolute_percentage_error,
-                             mean_squared_error)
+from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import (GridSearchCV, RandomizedSearchCV,
                                      cross_val_score, train_test_split)
-from tqdm import tqdm
 from tsfresh import extract_relevant_features
-from tsfresh.feature_extraction import (EfficientFCParameters,
-                                        ComprehensiveFCParameters,
-                                        MinimalFCParameters)
-from tsfresh.feature_selection.relevance import calculate_relevance_table
+from tsfresh.feature_extraction import EfficientFCParameters
 from tsfresh.utilities.dataframe_functions import add_sub_time_series_index
 from utils.data_loader import load_from_tsfile_to_dataframe
 
-from utils.regressor import calculate_metrics, create_regressor
+from utils.regressor import create_regressor
 from utils.regressor_tools import calculate_regression_metrics, min_len, process_data
 from utils.tools import create_directory
-from utils.ts_tools import transform_data
 from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import SelectFdr, SelectKBest, SequentialFeatureSelector
-from sklearn.decomposition import PCA
+from sklearn.feature_selection import  SelectKBest, SequentialFeatureSelector
 from tsfel import *
 from sklearn.feature_selection import f_regression, mutual_info_regression
 import seaborn as sns
 import matplotlib.pyplot as plt
 from utils.tools import create_directory
 
-params_rs_default = {
-    'linear_regression': [{}],
-    'random_forest': [{}],
-    'xgboost': [{}],
-    'SVR': [{}]
-}
+
 
 
 class Experience():
@@ -251,12 +235,12 @@ class Experience():
             time = datetime.now()
 
             nom_fichier = self.nom_probleme+'-'+self.config_general['librairie_extraction_features']+"{}-{}-{}-{}.png".format(time.strftime("%Y"),time.strftime("%B"),time.strftime("%d"),time.strftime("%S"))
-            plt.savefig(self.dossier_sortie+'/'+nom_fichier)
+            plt.savefig(self.dossier_sortie+'/'+nom_fichier+'.pdf')
 
         return self.dico_regresseurs
 
         # ------------------------------------------------------ Optimisation hyperparamètres -------------------------------------------------------------
-    def optimisation_hpo(self):
+    def hp_optimisation(self):
         '''
         TODO description
         '''
@@ -316,11 +300,21 @@ class Experience():
         '''
         TODO: Description
         '''
+        from sklearn.feature_selection import r_regression
         fs = SelectKBest(score_func=mutual_info_regression, k='all')
         fs.fit(self.X, self.Y)
         result = pd.DataFrame({
-            'nom_features': [nom_feature for nom_feature in fs.feature_names_in_],
-            'fscore': [fscore for fscore in fs.scores_]})
+            'nom_features': [nom_feature for nom_feature in self.X],
+            'coefficient_de_Pearson': r_regression(self.X,self.Y)})
+
+        return result
+    
+    def kendall(self):
+        fs = SelectKBest(score_func=self.custom_kendall, k='all')
+        fs.fit(self.X, self.Y)
+        result = pd.DataFrame({
+            'nom_features': [nom_feature for nom_feature in self.X],
+            'coefficient_de_Kendall': [kendalltau(self.X[colonne], self.Y)[0] for colonne in self.X]})
 
         return result
 
@@ -376,18 +370,34 @@ class Experience():
                 self.dico_regresseurs[clee+'_sfs'] = nouveau_regresseur
 
     def plot_mutual_regression(self):
-        plt.figure(figsize=(20, 10))
+        plt.figure(figsize=(20, 15))
         mr = self.mutual_regression()
-        mr = mr.sort_values(by='fscore', inplace=False, ascending=False)
-        sns.barplot(data=mr, x='fscore', y='nom_features', palette='rocket')
+        mr = mr.sort_values(by='coefficient_de_Pearson', inplace=False, ascending=False)
+        sns.barplot(data=mr, x='coefficient_de_Pearson', y='nom_features', palette='rocket')
+        plt.savefig(self.nom_probleme+"_pearson"+".pdf")
         plt.show()
 
     def plot_fscore(self):
-        plt.figure(figsize=(20, 10))
+        plt.figure(figsize=(20, 15))
         fs = self.fscore()
         fs = fs.sort_values(by='fscore', inplace=False, ascending=False)
         sns.barplot(data=fs, x='fscore', y='nom_features', palette='rocket')
         plt.show()
+        
+    def custom_kendall(self,x,y):
+        res = [(kendalltau(self.X[colonne], self.Y)[0],kendalltau(self.X[colonne], self.Y)[1]) for colonne in self.X]
+        score = [i[0] for i in res ]
+        pvalue = [i[1] for i in res ]
+        return (score,pvalue)
+        
+    def plot_kendall(self):
+        plt.figure(figsize=(20, 15))
+        fs = self.kendall()
+        fs = fs.sort_values(by='coefficient_de_Kendall', inplace=False, ascending=False)
+        sns.barplot(data=fs, x='coefficient_de_Kendall', y='nom_features', palette='rocket')
+        plt.savefig(self.nom_probleme+"_kendall"+ ".pdf")
+        plt.show()
+        
         # ------------------------------------------------------Transformation des données  -------------------------------------------------------------
 
     # TODO Il faudrait que les formatter puissent travailler sur des données déjà process
@@ -505,5 +515,34 @@ class Experience():
             print("[base {}] rmse : {:.5f} mae : {:.5f} temps entrainement: {:.3f} s ".format(clee,df_metrics.iloc[0]['rmse'],df_metrics.iloc[0]['mae'],train_duration))
             
 
-
+    def run(self):
+            self.changer_librairie_extraction('tsfel')
+            warnings.filterwarnings("ignore")
+            # debug
+            self.init_regresseurs()
+            self.load()
+            print(len(self.X))
+            print(self.config_general)
             
+            # script
+
+            self.hp_optimisation()
+            self.optimisation_nombre_feature()
+            self.comparer_modele()
+            
+            self.changer_librairie_extraction('tsfresh')
+            self.transformation()
+            print(self.X.shape)
+            self.init_regresseurs()
+            self.hp_optimisation()
+            self.optimisation_nombre_feature()
+            self.comparer_modele()
+            
+            print("Originaux")
+            self.config_general['extraction_features'] = False
+            self.transformation()
+            self.init_regresseurs()
+            self.hp_optimisation()
+            # self.optimisation_nombre_feature()
+            self.comparer_modele()
+                
