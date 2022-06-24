@@ -431,6 +431,7 @@ class Experience():
         return (ex,Y)
 
     def tsfel_format(self, X, Y, normalise=None, verbose=True):
+        warnings.filterwarnings("ignore")
         '''
         TODO Description
         '''
