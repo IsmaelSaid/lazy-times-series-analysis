@@ -1,4 +1,9 @@
 # Time Series Extrinsic Regression
+### Comparaison xgboost/tsfel random forest/tsfel
+![](/out/Covid3Month-tsfel2023-August-20-05.png-1.png)
+
+### Comparaison xgboost/tsfresh random forest/tsfresh
+![](/out/Covid3Month-tsfresh2023-August-20-20.png-1.png) 
 
 
 ### Dépendances 
